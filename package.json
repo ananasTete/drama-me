@@ -1,0 +1,23 @@
+{
+	"name": "drama-me",
+	"private": true,
+	"scripts": {
+		"dev": "turbo run dev",
+		"dev:be": "turbo run dev --filter=@drama-me/backend",
+		"dev:fe": "turbo run dev --filter=@drama-me/frontend",
+		"format": "biome format --write .",
+		"format:be": "biome format --write packages/backend",
+		"format:fe": "biome format --write packages/frontend",
+		"lint": "biome check .",
+		"lint:be": "biome check packages/backend",
+		"lint:fe": "biome check packages/frontend"
+	},
+	"packageManager": "pnpm@10.24.0",
+	"pnpm": {
+		"onlyBuiltDependencies": ["@biomejs/biome", "turbo"]
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
+		"turbo": "^2.5.0"
+	}
+}
