@@ -6,7 +6,7 @@
 		"strict": true,
 		"skipLibCheck": true,
 		"types": ["bun"],
-		"declaration": true,
+		"declaration": false,
 		"outDir": "./dist",
 		"rootDir": "./src"
 	},

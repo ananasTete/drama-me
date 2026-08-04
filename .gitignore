@@ -3,3 +3,10 @@ dist
 .drizzle
 *.db
 *.db-journal
+.env
+.env.local
+node_modules
+dist
+.drizzle
+*.db
+*.db-journal
