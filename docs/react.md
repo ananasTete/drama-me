@@ -20,8 +20,6 @@ filber：每个组件/DOM 节点对应一个 **fiber 节点**对象，整棵 UI 
 | `type`    | 组件/DOM 类型，必须一致才能复用               |
 
 
-
-
 ### 理解 react 更新机制
 
 
@@ -107,7 +105,8 @@ function TodoItem({ todo }) {
   <footer />
 </>
 ```
-2. 这个会
+
+1. 这个会
 
 ```tsx
 {checked ? (
@@ -141,8 +140,6 @@ function TodoItem({ todo }) {
 1. 你想要的是少挂原生监听，那可以不用做了。比如在 ul>li 下一般都使用 map 来处理，只要在 li 上挂 onClick 事件即可，不用考虑在 ul 上
 2. 富文本、图表库、自己 `appendChild` 的节点、部分 canvas/widget——**不走 React 合成事件**。这时经典委托仍然有用。
 
-
-
 ### 通过合成事件来实现跨浏览器一致性、统一 API
 
 在 fiber 树中冒泡或捕获找到 handler 之后，react 把原生 event 包成 合成事件，再调用你的 onClick。
@@ -162,8 +159,6 @@ function TodoItem({ todo }) {
 1. 使用一套 API，不管底层浏览器是什么
 2. 仍然可以通过 `e.nativeEvent` 访问浏览器原生事件对象。
 
-
-
 ### 不走react事件委托和合成事件的节点
 
 由 React 创建的节点才会生成 filber，如果某个 DOM 不是 React `createElement` / JSX 渲出来的，如
@@ -174,3 +169,124 @@ function TodoItem({ todo }) {
 - 点击落在 canvas 像素上
 
 这些库可能内部实现事件委托但不参与 react 这套事件委托机制。当点击真实 DOM 时会在浏览器冒泡或捕获阶段来处理，事件对象也不是合成事件而是原生事件。如果走到了 root 因为组件树中没有这个节点所以也不会在组件树中冒泡。
+
+### 受控与非受控
+
+- 受控组件：值由 React state 管理，每次输入都通过 onChange 更新 state，适合拦截处理转换。
+- 非受控组件：值由 DOM 自身管理，用 ref 获取最终值，适合简单提交。
+
+### 组件通信
+
+父组件主动调子组件方法，多数时候说明数据流反了，可以把子组件状态和方法上提到父组件，子组件只做为受控组件。需要使用 ref / useImperativeHandle 时需要子组件必须完全封装内部状态（第三方表单、历史包袱、短期难上提）。
+子组件调用父组可以通抛出回调函数的方法，但注意可能会引发下面的 useCallback/Memo 链条地狱
+
+### useCallback/Memo 链条地狱
+
+问题原因：HeavyChild 使用了 memo，导致 onSave 和 filters 需要 useCallBack/Memo。如果 onS那就要一层层 useCallback 下去。
+
+```typescript
+function Parent() {
+  const [query, setQuery] = useState("")
+  const [user, setUser] = useState(userFromServer)
+
+  // 为了稳定 onClick，依赖 user
+  const onSave = useCallback(() => {
+    api.save({ query, userId: user.id })
+  }, [query, user])
+
+  // Child 被 memo 了，于是 Parent 又去 memo filters……
+  const filters = useMemo(() => ({ q: query }), [query])
+  return <HeavyChild filters={filters} onSave={onSave} />
+}
+```
+
+解决方案：（事件中按以下顺序考虑）
+
+- 最简单：在 react19 下，react compiler 会自动处理 useCallback/Memo。
+- 别为了 memo 而 memo，当 child 不大，重渲染成本不高时，不用 memo(child)。
+- 尽可能通过拆分组件来让状态下沉：
+  - parent 如果包含两个各自独立的部分AB，那就拆分成 ChildA 和 ChildB，各自更新。
+  - 如果 A 需要影响 B 的更新，且 A 部分很简单比如就是一组表单，那不用拆成 childA 也行，因为只要 A 变化 B 就该重渲染。
+  - 但也可以拆分成 childA 抛出回调函数更新, 这样可以避免 childA 中对 childB 更新无意义的状影响到后者。
+  - 如果存在 ABC 三部分，AB 互相影响，C 独立时，可以进一拆分成 parent（ parent-1（A + B） + C），拆成一个父组件内的 child 都互相影响的
+- 子组件各自拆分后，各自订阅 zustand 状态以及更新状态
+- 必须用 memo() 的话，要意识到其 props 比较是浅比较，也可以通过自定义 props 比较器来控制哪些 props 在什么条件下会重渲染组件
+
+```ts
+// 组件规范以 Pur开头命名
+function PureArtifact() {}
+
+// 导出时去掉 Pure，返回 true = 相等 = 不渲染。
+export const Artifact = memo(PureArtifact, (prevProps, nextProps) => {
+  if (prevProps.status !== nextProps.status) {
+    return false;
+  }
+  if (!equal(prevProps.votes, nextProps.votes)) {
+    return false;
+  }
+  if (prevProps.input !== nextProps.input) {
+    return false;
+  }
+  //注意这里使用长度条件比较
+  if (prevProps.messages.length !== nextProps.messages.length) {
+    return false;
+  }
+  if (prevProps.selectedVisibilityType !== nextProps.selectedVisibilityType) {
+    return false;
+  }
+
+  return true;
+});
+```
+
+### 闭包陷阱
+
+#### 常见 useEffect 中的闭包陷阱
+
+```ts
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      console.log(count);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleClick = () => {
+    setCount(count + 1);
+  };
+  return (
+    <div>
+      <p>Count: {count}</p>
+      <button onClick={handleClick}>Increment</button>
+    </div>
+  );
+}
+```
+
+结果：始终打印 0
+
+原因：
+
+1. useEffect 中访问了 count， 形成了闭包（函数会保存它被定义时所在作用域里的变量的引用，函数就成了闭包）
+2. useEffect 没有依赖只会执行一次，而每次组件更新都会重新执行一遍组件函数，这意味着 count、setCount、useEffect、handleClick 都被重新创建了。useEffect 的闭包中保存的还是上次的变量引用所以访问的一直是 0
+
+修复：将 count 作为 useEffect 的依赖，这样在重新执行组件函数时，会先清除之前的定时器，再重新注册一个包含新变量引用的函数。
+
+#### 为什么 useState 要使用回调来更新值？也是因为闭包
+
+```ts
+const handleClick = () => {
+  setCount(count + 1);
+  setCount(count + 1);
+  setCount(count + 1);
+};
+```
+
+ count 始终是 0，所以只是三次对 count 赋值为 1。最终渲染结果也只能加一。
+
+### 父子组件中 useEffect 执行顺序
+
+挂载：先子后父；卸载：先父后子

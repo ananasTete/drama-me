@@ -1,5 +1,18 @@
-import { relations } from "drizzle-orm";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+	CURRENT_CANVAS_SCHEMA_VERSION,
+	type CanvasEdge,
+	type CanvasNode,
+	type CanvasViewport,
+	EMPTY_CANVAS_VIEWPORT,
+} from "@drama-me/shared";
+import { relations, sql } from "drizzle-orm";
+import {
+	check,
+	index,
+	integer,
+	sqliteTable,
+	text,
+} from "drizzle-orm/sqlite-core";
 
 // ──────────────────────────────────────────────
 // Better Auth 核心表
@@ -9,7 +22,7 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /**
  * 用户表
- * 手机号 / Google 登录首次验证通过后自动创建记录（自动注册）。
+ * 账号密码登录：账号映射为 email 存储；Google 登录可选。
  */
 export const user = sqliteTable("user", {
 	id: text("id").primaryKey(),
@@ -82,12 +95,53 @@ export const verification = sqliteTable("verification", {
 	updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * 画布表：一份文档一行。
+ * 信封字段是真正的列；viewport / nodes / edges 用 JSON 文本存储。
+ * 图内容的结构由应用层校验，数据库只保证这些 JSON 列非空。
+ */
+export const canvas = sqliteTable(
+	"canvas",
+	{
+		id: text("id").primaryKey(),
+		ownerId: text("ownerId")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		viewport: text("viewport", { mode: "json" })
+			.$type<CanvasViewport>()
+			.notNull()
+			.default(EMPTY_CANVAS_VIEWPORT),
+		nodes: text("nodes", { mode: "json" })
+			.$type<CanvasNode[]>()
+			.notNull()
+			.default([]),
+		edges: text("edges", { mode: "json" })
+			.$type<CanvasEdge[]>()
+			.notNull()
+			.default([]),
+		schemaVersion: integer("schemaVersion")
+			.notNull()
+			.default(CURRENT_CANVAS_SCHEMA_VERSION),
+		// 乐观锁：内容保存成功后 +1；仅更新 viewport 时不改
+		revision: integer("revision").notNull().default(1),
+		createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
+		updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
+	},
+	(table) => [
+		index("canvas_ownerId_updatedAt_idx").on(table.ownerId, table.updatedAt),
+		check("canvas_schema_version_positive", sql`${table.schemaVersion} >= 1`),
+		check("canvas_revision_positive", sql`${table.revision} >= 1`),
+	],
+);
+
 // ──────────────────────────────────────────────
 // 关系定义（供 drizzle 关联查询使用）
 // ──────────────────────────────────────────────
 export const userRelations = relations(user, ({ many }) => ({
 	sessions: many(session),
 	accounts: many(account),
+	canvases: many(canvas),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -97,4 +151,7 @@ export const sessionRelations = relations(session, ({ one }) => ({
 export const accountRelations = relations(account, ({ one }) => ({
 	user: one(user, { fields: [account.userId], references: [user.id] }),
 }));
-// Drizzle schema placeholder — tables will be added as needed.
+
+export const canvasRelations = relations(canvas, ({ one }) => ({
+	owner: one(user, { fields: [canvas.ownerId], references: [user.id] }),
+}));

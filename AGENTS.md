@@ -36,9 +36,10 @@ drama-me/
 │   │   └── src/
 │   │       ├── main.tsx       # 应用入口
 │   │       ├── router.tsx     # 路由树
-│   │       ├── routes/        # 页面路由
-│   │       ├── components/    # UI 组件
-│   │       ├── lib/           # 工具函数、API 客户端
+│   │       ├── routes/        # 页面路由（validateSearch + 挂页面）
+│   │       ├── features/      # 按业务模块组织的页面与数据层
+│   │       ├── components/    # 全局 UI 组件（shadcn 等）
+│   │       ├── lib/           # 工具函数、API 客户端、会话
 │   │       └── stores/        # Zustand stores
 │   └── shared/           # 前后端共享
 │       └── src/validators/    # Zod Schema
@@ -67,6 +68,59 @@ drama-me/
 
 项目已启用 [React Compiler](https://react.dev/learn/react-compiler)（`babel-plugin-react-compiler`，见 `packages/frontend/vite.config.ts`）。编译器会在构建时自动插入 memo 逻辑，**禁止手动使用 `useMemo` 和 `useCallback`**——它们会与编译器优化冲突，并带来不必要的维护成本。
 
+### 前端状态管理
+
+按数据来源选择状态方案，避免把服务端数据或应持久化的 UI 状态塞进 `useState` / `useReducer`。
+
+| 数据类型 | 方案 | 示例 |
+| -------- | ---- | ---- |
+| 服务端数据 | **TanStack Query**（`useQuery` / `useInfiniteQuery` / `useMutation`） | 列表、详情、创建/删除 |
+| 筛选、分页、排序等页面状态 | **URL search params**（TanStack Router `validateSearch`） | `?keyword=foo&sortBy=updatedAt` |
+| 临时本地 UI 状态 | `useState` / `useReducer` | 弹窗开关、表单草稿、拖拽中间态 |
+
+**URL 优先**：筛选条件、分页页码、排序字段等，只要用户可能刷新、分享或后退，就应写入 URL query，而不是组件 state。未提交的输入（如搜索框草稿）可暂存本地，提交后再同步到 URL。
+
+**Query 管服务端数据**：组件内发起网络请求必须通过 TanStack Query，不在 `useEffect` 或事件处理里直接 `await` API。HTTP 放在 `features/*/api.ts`，`queryKey` / `queryFn` / `invalidateQueries` 封装在模块 `hooks.ts`（或 `hooks/`）；组件只调用这些 hook。
+
+**本地 state 只放临时态**：`useState` 仅用于不需要跨刷新保留、也不来自服务端的 UI 状态。不要把列表数据、加载中、错误信息手动维护在 state 里——交给 Query 的 `data` / `isPending` / `error`。
+
+**例外**：路由 `beforeLoad` 中的会话解析（`resolveSession`）与进程内会话缓存（`rememberSession`）服务于鉴权守卫，不经过 Query；登录/登出等写操作在组件内仍应使用 `useMutation`。
+
+### Feature 模块结构
+
+业务放在 `packages/frontend/src/features/<module>/`。**按数据边界分文件，按文件数量决定要不要变成目录**——有则拆、无则扁平，不要为每个模块预先建空目录。
+
+长大后的上限结构：
+
+```
+features/<module>/
+  query-keys.ts     # TanStack Query key 工厂（有服务端读写才需要）
+  api.ts            # HTTP 纯函数，无 React；作为 queryFn / mutationFn
+  hooks.ts          # 或 hooks/：Query 封装 + 业务 hook（超过约 2 个文件再拆目录）
+  components/       # 从页面拆出的子组件（有第 2 个才建目录）
+  utils.ts          # 或 utils/：模块工具（有第 2 个文件再拆目录）
+  types.ts          # 仅前端私有类型；DTO 用 @drama-me/shared，不要再抄一份
+  <page>.tsx        # 页面入口（路由只挂这一个组件）
+  index.ts          # 对外导出：页面、query-keys、必要时 hooks
+```
+
+| 层 | 职责 | 谁可以引用 |
+| -- | ---- | ---------- |
+| `query-keys.ts` | key 工厂，如 `canvasKeys.list(filters)` | 模块 hooks |
+| `api.ts` | `HttpClient` + `throwIfNotOk` | 仅作为 `queryFn` / `mutationFn` |
+| `hooks.ts` | `useQuery` / `useInfiniteQuery` / `useMutation` | 页面与模块内组件 |
+| `components/` | 模块 UI 子块 | 本模块页面 |
+| `index.ts` | 模块对外承诺 | `routes/`、少数跨模块调用（如布局里的 `useSignOut`） |
+
+约束：
+
+- **不要把 HTTP 写进 hooks**：`api.ts` 不依赖 React，便于测试和将来在非组件里复用。
+- **组件里不要手写 Query 配置**：`queryKey`、`queryFn`、`invalidateQueries` 放在模块 hooks 里。
+- **`index.ts` 不要全量 re-export 内部组件**，避免循环依赖、模糊边界。
+- **没有服务端数据的模块**（如当前 `learn-flow`）不要硬建 `api.ts` / `query-keys.ts`。
+- 筛选/分页/排序仍由路由 `validateSearch` 写入 URL，不要放进 feature 的 `types` 当「页面状态源」。
+- 登出时用 `queryClient.clear()` 清掉当前用户的服务端缓存，避免 auth 依赖各个业务模块的 query-keys。
+
 ## 常用命令
 
 ```bash
@@ -94,3 +148,6 @@ Hono 路由 (中间件 → 校验 → 业务逻辑)
   ↕ Drizzle ORM
 SQLite
 ```
+
+业务接口的成功/失败形状见 [docs/api-response.md](docs/api-response.md)。
+
