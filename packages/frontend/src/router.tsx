@@ -4,11 +4,9 @@ import { Route as canvasRoute } from "./routes/canvas";
 import { Route as indexRoute } from "./routes/index";
 import { Route as learnFlowRoute } from "./routes/learn-flow";
 import { Route as loginRoute } from "./routes/login";
-import { Route as testRoute } from "./routes/test";
 
 const routeTree = rootRoute.addChildren([
 	indexRoute,
-	testRoute,
 	learnFlowRoute,
 	canvasRoute,
 	loginRoute,

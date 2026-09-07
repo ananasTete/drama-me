@@ -1,3 +1,4 @@
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { useSession, useSignOut } from "@/features/auth";
 import { formatAccountLabel } from "@/lib/auth";
@@ -35,9 +36,6 @@ function RootLayout() {
 					<Link to="/" className="text-sm hover:underline">
 						Home
 					</Link>
-					<Link to="/test" className="text-sm hover:underline">
-						Test
-					</Link>
 					<Link
 						to="/canvas"
 						search={{ keyword: "", sortBy: "updatedAt" }}
@@ -49,7 +47,10 @@ function RootLayout() {
 						Learn Flow
 					</Link>
 				</nav>
-				<AccountMenu />
+				<div className="flex items-center gap-3">
+					<ThemeToggle />
+					<AccountMenu />
+				</div>
 			</header>
 			<main className="flex min-h-0 flex-1 flex-col p-6">
 				<Outlet />

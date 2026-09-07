@@ -4,6 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>drama-me</title>
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem("drama-me-theme");
+          if (!raw) return;
+          var theme = JSON.parse(raw).state?.theme ?? "system";
+          var prefersDark = window.matchMedia(
+            "(prefers-color-scheme: dark)",
+          ).matches;
+          var isDark =
+            theme === "dark" || (theme === "system" && prefersDark);
+          document.documentElement.classList.toggle("dark", isDark);
+        } catch {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

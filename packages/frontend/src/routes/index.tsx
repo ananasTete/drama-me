@@ -7,9 +7,7 @@ export const Route = createRoute({
 	component: () => (
 		<div>
 			<h2 className="text-2xl font-semibold mb-2">drama-me</h2>
-			<p className="text-muted-foreground">
-				Welcome. Go to /test to verify the backend connection.
-			</p>
+			<p className="text-muted-foreground">Welcome to drama-me.</p>
 		</div>
 	),
 });

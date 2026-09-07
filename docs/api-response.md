@@ -2,7 +2,7 @@
 
 业务接口（`/api/canvases`、`/api/me` 等）用 **HTTP 状态码表示大类，JSON 里的 `error.code` 表示具体规则**。不要包一层 `{ code, msg, data }`，也不要永远返回 HTTP 200。
 
-`/api/auth/*` 仍走 better-auth 自己的格式。`/api/health` 保持简单健康检查 JSON。
+`/api/auth/*` 仍走 better-auth 自己的格式。
 
 ## 成功
 
