@@ -1,12 +1,14 @@
 node_modules
 dist
 .drizzle
-*.db
-*.db-journal
 .env
 .env.local
-node_modules
-dist
-.drizzle
+
+# macOS
+.DS_Store
+
+# SQLite
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
