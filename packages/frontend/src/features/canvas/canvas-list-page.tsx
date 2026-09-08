@@ -1,4 +1,5 @@
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useDeferredPending } from "@/hooks/use-deferred-pending";
 import { isApiError } from "@/lib/api";
 import { ERROR_CODE } from "@drama-me/shared";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -6,6 +7,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { CanvasCard } from "./components/canvas-card";
 import { CanvasListToolbar } from "./components/canvas-list-toolbar";
+import { CanvasListSkeleton } from "./components/canvas-list-skeleton";
 import { DeleteCanvasDialog } from "./components/delete-canvas-dialog";
 import {
 	useCanvasList,
@@ -16,8 +18,8 @@ import {
 import type { CanvasDeleteTarget } from "./types";
 
 function CanvasListPage() {
-	const navigate = useNavigate({ from: "/canvas" });
-	const { keyword, sortBy } = useSearch({ from: "/canvas" });
+	const navigate = useNavigate({ from: "/projects" });
+	const { keyword, sortBy } = useSearch({ from: "/projects" });
 	const [keywordInput, setKeywordInput] = useState(keyword);
 	const [canvasToDelete, setCanvasToDelete] =
 		useState<CanvasDeleteTarget | null>(null);
@@ -27,6 +29,8 @@ function CanvasListPage() {
 	}, [keyword]);
 
 	const listQuery = useCanvasList({ keyword, sortBy });
+	const showSkeleton = useDeferredPending(listQuery.isPending);
+	const isPendingWithoutSkeleton = listQuery.isPending && !showSkeleton;
 	const canvases = listQuery.data?.pages.flatMap((page) => page.canvases) ?? [];
 	const { fetchNextPage, hasNextPage, isFetchingNextPage } = listQuery;
 	const sentinelRef = useFetchNextOnSentinel(
@@ -35,7 +39,9 @@ function CanvasListPage() {
 		isFetchingNextPage,
 	);
 
-	const createMutation = useCreateCanvas();
+	const createMutation = useCreateCanvas((canvasId) => {
+		void navigate({ to: "/canvas/$canvasId", params: { canvasId } });
+	});
 	const deleteMutation = useDeleteCanvas(() => setCanvasToDelete(null));
 
 	function updateSearch(next: {
@@ -80,27 +86,29 @@ function CanvasListPage() {
 
 			<ScrollArea className="min-h-0 flex-1">
 				<div className="p-4">
-					{listQuery.isLoading && (
-						<p className="text-sm text-muted-foreground">加载中...</p>
-					)}
+					{showSkeleton && <CanvasListSkeleton />}
 
-					{isUnauthorized && (
+					{!isPendingWithoutSkeleton && isUnauthorized && (
 						<p className="text-sm text-muted-foreground">
 							请先登录后再查看画布列表
 						</p>
 					)}
 
-					{listQuery.isError && !isUnauthorized && (
+					{!isPendingWithoutSkeleton &&
+						listQuery.isError &&
+						!isUnauthorized && (
 						<p className="text-sm text-destructive">加载失败，请稍后重试</p>
 					)}
 
-					{listQuery.isSuccess && canvases.length === 0 && (
+					{!isPendingWithoutSkeleton &&
+						listQuery.isSuccess &&
+						canvases.length === 0 && (
 						<p className="text-sm text-muted-foreground">
 							还没有画布，点击右上角创建
 						</p>
 					)}
 
-					{canvases.length > 0 && (
+					{!isPendingWithoutSkeleton && canvases.length > 0 && (
 						<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
 							{canvases.map((canvas) => (
 								<CanvasCard

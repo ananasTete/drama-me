@@ -21,6 +21,14 @@ export async function fetchCanvasPage(
 	return res.json();
 }
 
+export async function fetchCanvas(id: string) {
+	const res = await HttpClient.api.canvases[":id"].$get({
+		param: { id },
+	});
+	await throwIfNotOk(res);
+	return res.json();
+}
+
 export async function createUntitledCanvas() {
 	const res = await HttpClient.api.canvases.$post({
 		json: { name: DEFAULT_CANVAS_NAME },

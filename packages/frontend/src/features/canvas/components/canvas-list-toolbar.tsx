@@ -69,9 +69,6 @@ export function CanvasListToolbar({
 							))}
 						</SelectContent>
 					</Select>
-					<Button type="submit" variant="outline">
-						筛选
-					</Button>
 				</form>
 				<Button type="button" onClick={onCreate} disabled={createPending}>
 					{createPending ? "创建中..." : "创建画布"}

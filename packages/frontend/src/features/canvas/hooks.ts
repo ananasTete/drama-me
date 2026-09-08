@@ -2,34 +2,37 @@ import {
 	useInfiniteQuery,
 	useMutation,
 	useQueryClient,
+	useSuspenseQuery,
 } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { createUntitledCanvas, deleteCanvas, fetchCanvasPage } from "./api";
+import { createUntitledCanvas, deleteCanvas } from "./api";
 import { canvasKeys } from "./query-keys";
+import {
+	canvasDetailQueryOptions,
+	canvasListQueryOptions,
+} from "./query-options";
 import type { CanvasListFilters } from "./types";
 
 // 页面已由路由守卫保证已登录，这里不再判断会话
 export function useCanvasList(filters: CanvasListFilters) {
-	return useInfiniteQuery({
-		queryKey: canvasKeys.list(filters),
-		queryFn: ({ pageParam }) => fetchCanvasPage(filters, pageParam),
-		initialPageParam: 1,
-		getNextPageParam: (lastPage) => {
-			if (lastPage.page * lastPage.pageSize >= lastPage.total) {
-				return undefined;
-			}
-			return lastPage.page + 1;
-		},
-	});
+	return useInfiniteQuery(canvasListQueryOptions(filters));
 }
 
-export function useCreateCanvas() {
+export function useCanvas(id: string) {
+	return useSuspenseQuery(canvasDetailQueryOptions(id));
+}
+
+export function useCreateCanvas(onCreated?: (canvasId: string) => void) {
 	const queryClient = useQueryClient();
 
 	return useMutation({
 		mutationFn: createUntitledCanvas,
-		onSuccess: () => {
-			void queryClient.invalidateQueries({ queryKey: canvasKeys.lists() });
+		onSuccess: ({ canvas }) => {
+			void queryClient.invalidateQueries({
+				queryKey: canvasKeys.lists(),
+				refetchType: "none",
+			});
+			onCreated?.(canvas.id);
 		},
 	});
 }
