@@ -1,5 +1,5 @@
 import { LoginPage } from "@/features/auth";
-import { loadSession, resolvePostLoginRedirect } from "@/lib/auth";
+import { resolvePostLoginRedirect, resolveSession } from "@/lib/auth";
 import { createRoute, redirect } from "@tanstack/react-router";
 import { Route as rootRoute } from "./__root";
 
@@ -11,7 +11,7 @@ export const Route = createRoute({
 	}),
 	// 已登录用户不该停留在登录表单上
 	beforeLoad: async ({ search }) => {
-		if (await loadSession()) {
+		if (await resolveSession()) {
 			throw redirect({ to: resolvePostLoginRedirect(search.redirect) });
 		}
 	},

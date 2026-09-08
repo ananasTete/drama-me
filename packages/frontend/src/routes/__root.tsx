@@ -2,57 +2,70 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { useSession, useSignOut } from "@/features/auth";
 import { formatAccountLabel } from "@/lib/auth";
+import type { QueryClient } from "@tanstack/react-query";
 import {
 	Link,
 	Outlet,
-	createRootRoute,
+	createRootRouteWithContext,
 	useRouterState,
 } from "@tanstack/react-router";
 
 // 根路由不做鉴权：公开页面无需会话。
-// 需要登录的页面在自己的 beforeLoad 里挂 requireSession（见 routes/canvas.tsx）。
-export const Route = createRootRoute({
+// 需要登录的页面在自己的 beforeLoad 里挂 requireSession（见 routes/projects.tsx）。
+type RouterContext = {
+	queryClient: QueryClient;
+};
+
+export const Route = createRootRouteWithContext<RouterContext>()({
 	component: RootLayout,
 });
 
 function RootLayout() {
 	const pathname = useRouterState({
-		select: (state) => state.location.pathname,
+		select: (state) =>
+			state.resolvedLocation?.pathname ?? state.location.pathname,
 	});
-
-	if (pathname === "/login") {
-		return (
-			<div className="flex min-h-dvh flex-col bg-background">
-				<Outlet />
-			</div>
-		);
-	}
+	const isFullscreen = pathname === "/login" || pathname.startsWith("/canvas/");
 
 	return (
-		<div className="flex h-dvh flex-col overflow-hidden">
-			<header className="flex items-center gap-6 border-b px-6 py-3">
-				<h1 className="font-bold text-lg">drama-me</h1>
-				<nav className="flex flex-1 gap-4">
-					<Link to="/" className="text-sm hover:underline">
-						Home
-					</Link>
-					<Link
-						to="/canvas"
-						search={{ keyword: "", sortBy: "updatedAt" }}
-						className="text-sm hover:underline"
-					>
-						Canvas
-					</Link>
-					<Link to="/learn-flow" className="text-sm hover:underline">
-						Learn Flow
-					</Link>
-				</nav>
-				<div className="flex items-center gap-3">
-					<ThemeToggle />
-					<AccountMenu />
-				</div>
-			</header>
-			<main className="flex min-h-0 flex-1 flex-col p-6">
+		<div
+			className={
+				isFullscreen
+					? "flex min-h-dvh flex-col bg-background"
+					: "flex h-dvh flex-col overflow-hidden"
+			}
+		>
+			{isFullscreen ? null : (
+				<header className="flex items-center gap-6 border-b px-6 py-3">
+					<h1 className="font-bold text-lg">drama-me</h1>
+					<nav className="flex flex-1 gap-4">
+						<Link to="/" className="text-sm hover:underline">
+							Home
+						</Link>
+						<Link
+							to="/projects"
+							search={{ keyword: "", sortBy: "updatedAt" }}
+							className="text-sm hover:underline"
+						>
+							项目
+						</Link>
+						<Link to="/learn-flow" className="text-sm hover:underline">
+							Learn Flow
+						</Link>
+					</nav>
+					<div className="flex items-center gap-3">
+						<ThemeToggle />
+						<AccountMenu />
+					</div>
+				</header>
+			)}
+			<main
+				className={
+					isFullscreen
+						? "flex min-h-0 flex-1 flex-col"
+						: "flex min-h-0 flex-1 flex-col p-6"
+				}
+			>
 				<Outlet />
 			</main>
 		</div>

@@ -1,24 +1,34 @@
-import { authClient, loadSession, resolvePostLoginRedirect } from "@/lib/auth";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	rememberSession,
+	resolvePostLoginRedirect,
+	resolveSession,
+} from "@/lib/auth";
+import { authClient } from "@/lib/auth-client";
+import { useSessionStore } from "@/stores/session";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouter } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { signInOrSignUp } from "./api";
-import { authKeys } from "./query-keys";
 
 /**
  * 顶栏等组件展示当前登录用户用。
- * 路由守卫不走这里——它在 beforeLoad 里直接 loadSession()，不依赖组件生命周期。
+ * 读的是进程内会话缓存，和路由守卫共用；首次挂载时若还没查过才请求一次。
  */
 export function useSession() {
-	return useQuery({
-		queryKey: authKeys.session(),
-		queryFn: loadSession,
-		staleTime: 5 * 60 * 1000,
-	});
+	const session = useSessionStore((state) => state.session);
+
+	useEffect(() => {
+		void resolveSession();
+	}, []);
+
+	return {
+		data: session,
+		isPending: session === undefined,
+	};
 }
 
 export function useSignIn(redirect?: string) {
 	const navigate = useNavigate();
-	const queryClient = useQueryClient();
 
 	return useMutation({
 		mutationFn: async (input: { account: string; password: string }) => {
@@ -28,9 +38,8 @@ export function useSignIn(redirect?: string) {
 			}
 		},
 		onSuccess: async () => {
-			// 只标记过期：登录页没有渲染顶栏，所以此刻不会重新请求；
-			// 跳转后顶栏挂载时才拉一次，避免和目标页守卫的 loadSession 撞成两次。
-			void queryClient.invalidateQueries({ queryKey: authKeys.session() });
+			// cookie 刚换过，必须强制重拉，不能沿用登录页 beforeLoad 写下的 null
+			await resolveSession({ force: true });
 			await navigate({ to: resolvePostLoginRedirect(redirect) });
 		},
 	});
@@ -42,8 +51,11 @@ export function useSignOut() {
 
 	return useMutation({
 		mutationFn: () => authClient.signOut(),
+		onMutate: () => {
+			rememberSession(null);
+		},
 		onSuccess: async () => {
-			// 清掉当前用户的全部服务端缓存（含 session 查询），避免下一个用户看到残留数据
+			// 清掉当前用户的全部服务端缓存，避免下一个用户看到残留数据
 			queryClient.clear();
 			await router.navigate({
 				to: "/login",
