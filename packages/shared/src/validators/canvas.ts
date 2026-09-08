@@ -70,6 +70,8 @@ export const CanvasDtoSchema = z.object({
 	viewport: CanvasViewportSchema,
 	nodes: z.array(CanvasNodeSchema),
 	edges: z.array(CanvasEdgeSchema),
+	/** 是否在拖动节点时吸附到画布网格。 */
+	snapToGrid: z.boolean(),
 	schemaVersion: z.number().int().min(1),
 	revision: z.number().int().min(1),
 	createdAt: z.string(),
@@ -82,6 +84,7 @@ export const CanvasListItemSchema = CanvasDtoSchema.omit({
 	viewport: true,
 	nodes: true,
 	edges: true,
+	snapToGrid: true,
 });
 export type CanvasListItem = z.infer<typeof CanvasListItemSchema>;
 
@@ -105,6 +108,14 @@ export const CreateCanvasResponseSchema = z.object({
 	canvas: CanvasDtoSchema,
 });
 export type CreateCanvasResponse = z.infer<typeof CreateCanvasResponseSchema>;
+
+/** 画布编辑偏好单独保存，避免把临时 UI 状态（如小地图开关）写入服务端。 */
+export const UpdateCanvasSettingsBodySchema = z.object({
+	snapToGrid: z.boolean(),
+});
+export type UpdateCanvasSettingsBody = z.infer<
+	typeof UpdateCanvasSettingsBodySchema
+>;
 
 export const ListCanvasesQuerySchema = z.object({
 	keyword: z.string().max(CANVAS_NAME_MAX_LENGTH).optional(),
@@ -132,6 +143,13 @@ export const GetCanvasResponseSchema = z.object({
 	canvas: CanvasDtoSchema,
 });
 export type GetCanvasResponse = z.infer<typeof GetCanvasResponseSchema>;
+
+export const UpdateCanvasSettingsResponseSchema = z.object({
+	canvas: CanvasDtoSchema,
+});
+export type UpdateCanvasSettingsResponse = z.infer<
+	typeof UpdateCanvasSettingsResponseSchema
+>;
 
 export const DeleteCanvasResponseSchema = z.object({
 	id: z.string().min(1),

@@ -15,6 +15,13 @@
       "when": 1787712546332,
       "tag": "0001_canvas",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788857089990,
+      "tag": "0002_purple_lorna_dane",
+      "breakpoints": true
     }
   ]
 }

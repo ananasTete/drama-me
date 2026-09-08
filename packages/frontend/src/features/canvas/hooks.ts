@@ -5,7 +5,7 @@ import {
 	useSuspenseQuery,
 } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { createUntitledCanvas, deleteCanvas } from "./api";
+import { createUntitledCanvas, deleteCanvas, updateCanvasSettings } from "./api";
 import { canvasKeys } from "./query-keys";
 import {
 	canvasDetailQueryOptions,
@@ -45,6 +45,41 @@ export function useDeleteCanvas(onDeleted?: () => void) {
 		onSuccess: () => {
 			void queryClient.invalidateQueries({ queryKey: canvasKeys.lists() });
 			onDeleted?.();
+		},
+	});
+}
+
+export function useUpdateCanvasSettings() {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({ id, snapToGrid }: { id: string; snapToGrid: boolean }) =>
+			updateCanvasSettings(id, snapToGrid),
+		onMutate: async ({ id, snapToGrid }) => {
+			const queryKey = canvasKeys.detail(id);
+			await queryClient.cancelQueries({ queryKey });
+			const previousCanvas = queryClient.getQueryData(queryKey);
+
+			queryClient.setQueryData(queryKey, (current) => {
+				if (!current) {
+					return current;
+				}
+
+				return {
+					...current,
+					canvas: { ...current.canvas, snapToGrid },
+				};
+			});
+
+			return { queryKey, previousCanvas };
+		},
+		onError: (_error, _variables, context) => {
+			if (context?.previousCanvas) {
+				queryClient.setQueryData(context.queryKey, context.previousCanvas);
+			}
+		},
+		onSuccess: ({ canvas }) => {
+			queryClient.setQueryData(canvasKeys.detail(canvas.id), { canvas });
 		},
 	});
 }

@@ -120,6 +120,10 @@ export const canvas = sqliteTable(
 			.$type<CanvasEdge[]>()
 			.notNull()
 			.default([]),
+		// SQLite 以 0 / 1 存布尔值；默认关闭，保证旧画布迁移后的行为不变。
+		snapToGrid: integer("snapToGrid", { mode: "boolean" })
+			.notNull()
+			.default(false),
 		schemaVersion: integer("schemaVersion")
 			.notNull()
 			.default(CURRENT_CANVAS_SCHEMA_VERSION),

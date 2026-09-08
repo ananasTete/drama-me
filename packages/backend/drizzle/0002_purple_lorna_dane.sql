@@ -1,0 +1,1 @@
+ALTER TABLE `canvas` ADD `snapToGrid` integer DEFAULT false NOT NULL;

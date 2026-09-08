@@ -44,3 +44,12 @@ export async function deleteCanvas(id: string) {
 	await throwIfNotOk(res);
 	return res.json();
 }
+
+export async function updateCanvasSettings(id: string, snapToGrid: boolean) {
+	const res = await HttpClient.api.canvases[":id"].settings.$patch({
+		param: { id },
+		json: { snapToGrid },
+	});
+	await throwIfNotOk(res);
+	return res.json();
+}

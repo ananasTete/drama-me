@@ -12,6 +12,8 @@ import {
 	GetCanvasResponseSchema,
 	ListCanvasesQuerySchema,
 	ListCanvasesResponseSchema,
+	UpdateCanvasSettingsBodySchema,
+	UpdateCanvasSettingsResponseSchema,
 } from "@drama-me/shared";
 import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -47,6 +49,7 @@ function toCanvasDto(row: typeof canvas.$inferSelect) {
 		viewport: row.viewport,
 		nodes: row.nodes,
 		edges: row.edges,
+		snapToGrid: row.snapToGrid,
 		schemaVersion: row.schemaVersion,
 		revision: row.revision,
 		createdAt: toIso(row.createdAt),
@@ -72,6 +75,7 @@ const canvases = new Hono<{ Variables: AuthType }>()
 				viewport: EMPTY_CANVAS_VIEWPORT,
 				nodes: [],
 				edges: [],
+				snapToGrid: false,
 				schemaVersion: CURRENT_CANVAS_SCHEMA_VERSION,
 				revision: 1,
 				createdAt: now,
@@ -161,6 +165,32 @@ const canvases = new Hono<{ Variables: AuthType }>()
 
 		return c.json(GetCanvasResponseSchema.parse({ canvas: toCanvasDto(row) }));
 	})
+	.patch(
+		"/canvases/:id/settings",
+		paramValidator(CanvasIdParamSchema),
+		jsonValidator(UpdateCanvasSettingsBodySchema),
+		async (c) => {
+			const user = requireUser(c);
+			const { id } = c.req.valid("param");
+			const { snapToGrid } = c.req.valid("json");
+
+			const [updated] = await db
+				.update(canvas)
+				.set({ snapToGrid, updatedAt: new Date() })
+				.where(and(eq(canvas.id, id), eq(canvas.ownerId, user.id)))
+				.returning();
+
+			if (!updated) {
+				throw new AppError(ERROR_CODE.CANVAS_NOT_FOUND, 404, "Canvas not found");
+			}
+
+			return c.json(
+				UpdateCanvasSettingsResponseSchema.parse({
+					canvas: toCanvasDto(updated),
+				}),
+			);
+		},
+	)
 	.delete("/canvases/:id", paramValidator(CanvasIdParamSchema), async (c) => {
 		const user = requireUser(c);
 
