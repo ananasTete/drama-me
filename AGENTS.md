@@ -68,7 +68,7 @@ drama-me/
 
 项目已启用 [React Compiler](https://react.dev/learn/react-compiler)（`babel-plugin-react-compiler`，见 `packages/frontend/vite.config.ts`）。编译器会在构建时自动插入 memo 逻辑，**禁止手动使用 `useMemo` 和 `useCallback`**——它们会与编译器优化冲突，并带来不必要的维护成本。
 
-### 前端状态管理
+### 前端状态管理选择
 
 按数据来源选择状态方案，避免把服务端数据或应持久化的 UI 状态塞进 `useState` / `useReducer`。
 
@@ -78,54 +78,9 @@ drama-me/
 | 筛选、分页、排序等页面状态 | **URL search params**（TanStack Router `validateSearch`） | `?keyword=foo&sortBy=updatedAt` |
 | 临时本地 UI 状态 | `useState` / `useReducer` | 弹窗开关、表单草稿、拖拽中间态 |
 
-**URL 优先**：筛选条件、分页页码、排序字段等，只要用户可能刷新、分享或后退，就应写入 URL query，而不是组件 state。未提交的输入（如搜索框草稿）可暂存本地，提交后再同步到 URL。
+设计、实现或评审相关代码时，使用 [frontend-state-data-flow skill](docs/frontend-state-data-flow-skill/SKILL.md) 中的决策流程、实现模式与加载态规范。
 
-**URL 只表达非默认状态**：路由的 `validateSearch` 仍须给缺失参数提供稳定的默认值，供组件安全使用；但 URL 不应序列化这些默认值。例如默认列表页使用 `/projects`，而非 `/projects?keyword=&sortBy=updatedAt`。为有默认值的 search 参数配置 TanStack Router 的 `stripSearchParams(默认值)` 中间件；用户清空筛选或切回默认排序时，也应自动移除对应参数。
-
-**Query 管服务端数据**：组件内发起网络请求必须通过 TanStack Query，不在 `useEffect` 或事件处理里直接 `await` API。
-
-**本地 state 只放临时态**：`useState` 仅用于不需要跨刷新保留、也不来自服务端的 UI 状态。不要把列表数据、加载中、错误信息手动维护在 state 里——交给 Query 的 `data` / `isPending` / `error`。
-
-**例外**：登录态用 `resolveSession` / `rememberSession`（进程内三态缓存），**不走 Query**。TanStack Router 改查询参数也会重跑 `beforeLoad`，`shouldReload` 管不到它；守卫和顶栏必须共用这份缓存，否则筛选画布也会打 `/api/auth/get-session`。登录/登出仍用 `useMutation`。新的受保护页写 `beforeLoad: requireSession`。不要用无路径布局包一层——路由 id 会变成 `/_authenticated/canvas`，和 URL `/canvas` 不一致，`useSearch({ from })` 会对不上。
-
-### 加载态（骨架屏，避免快请求闪烁）
-
-快请求立刻出骨架再换成内容会闪一下。按「有没有可展示 data」分支，**不要**给骨架加最短展示时间（数据已到却继续看骨架）。
-
-**复用边界：** 只复用策略和两个小原语；骨架 / 空态 / 错误每个模块自己写。**不要**再包 `useNiceQuery` 或通用 `<QuerySkeleton>`（会绑死「一定占位 + 一定骨架」，详情页、弹窗不适用）。
-
-| 场景 | 做法 |
-|------|------|
-| 筛选 / 分页等会换 `queryKey` 的列表 | `useQuery` spread `keepPreviousQueryData`（`src/lib/query/loading.ts`），请求期间保留上一屏 |
-| 尚无任何可展示 data（首访、硬刷新、该 key 从未成功） | `useDeferredPending(isPending)`（`src/hooks/use-deferred-pending.ts`），默认 250ms 内完成则不出骨架；超时仍 pending 再出骨架，等到数据即可 |
-| 缓存命中 / `staleTime` 内回访 | 直接渲染内容 |
-| 详情 / 一次性查询（不该沿用上一份 data） | 只用 `useDeferredPending`，不要 `keepPreviousQueryData` |
-
-列表参考 `useModelsList` + `ModelsGrid`：
-
-```ts
-useQuery({ queryKey, queryFn, ...keepPreviousQueryData })
-```
-
-```tsx
-const { data, isPending, isError, error } = useXxxList()
-const showSkeleton = useDeferredPending(isPending)
-
-if (showSkeleton) return <本模块骨架 />
-if (isPending) return null
-// 再处理 error / empty / 内容
-```
-
-`keepPreviousData` 时 `isPending === false`（已有 placeholder），筛选切换不会误出骨架。传入 hook 的必须是 Query 的 `isPending`。
-
-**禁止事项**
-
-- **禁止**用 `isPending` 立刻渲染整表骨架（快网会闪烁）
-- **禁止**用 `isFetching` 驱动骨架（后台刷新、`keepPreviousData` 换 key 时也会为 true）
-- **禁止**骨架最短展示时间（数据已返回仍等到满 N ms 才切内容）
-- **禁止**把 `keepPreviousQueryData` 或延迟骨架设成 QueryClient 全局默认（详情页会短暂显示上一条；延迟是 UI 决策）
-
-延迟窗口内（`isPending && !showSkeleton`）不要渲染空状态文案，返回 `null`，避免「暂无数据」闪一下再出列表。
+实现或修改无限滚动列表时，同时使用 [infinite-scroll skill](docs/infinite-scroll-skill/SKILL.md)。
 
 ### Feature 模块结构
 
@@ -161,6 +116,13 @@ features/<module>/
 - **没有服务端数据的模块**（如当前 `learn-flow`）不要硬建 `api.ts` / `query-keys.ts`。
 - 筛选/分页/排序仍由路由 `validateSearch` 写入 URL，不要放进 feature 的 `types` 当「页面状态源」。
 - 登出时用 `queryClient.clear()` 清掉当前用户的服务端缓存，避免 auth 依赖各个业务模块的 query-keys。
+
+### React 状态规范：状态就近/下沉
+
+- **默认下沉**：默认将 state 放在真正使用它的最小组件中；仅当多个兄弟/跨层级需要共享、需要单一数据源或受控编排时，才提升到最近公共父级、Context 或 store。
+- **仅在必要时提升**：新增 state 前先问：谁读？谁写？父组件是否真的需要？父组件不读不控，就下沉。
+- **即使启用 React Compiler 也必须遵守**：自动 memo 不能替代状态下沉的架构收益，不能阻止状态所在组件自身重渲染，也不能替代职责拆分与局部优化。
+- **拆分尺度**：下沉优先为了结构清晰、可维护、可测试、缩小重渲染与副作用影响范围；不要为性能过度拆分。
 
 ## 常用命令
 
