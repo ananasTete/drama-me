@@ -14,6 +14,7 @@ import {
 	useCreateCanvas,
 	useDeleteCanvas,
 	useFetchNextOnSentinel,
+	useRefreshCanvasList,
 } from "./hooks";
 import type { CanvasDeleteTarget } from "./types";
 
@@ -29,6 +30,7 @@ function CanvasListPage() {
 	}, [keyword]);
 
 	const listQuery = useCanvasList({ keyword, sortBy });
+	const refreshCanvasList = useRefreshCanvasList();
 	const showSkeleton = useDeferredPending(listQuery.isPending);
 	const isPendingWithoutSkeleton = listQuery.isPending && !showSkeleton;
 	const canvases = listQuery.data?.pages.flatMap((page) => page.canvases) ?? [];
@@ -48,13 +50,27 @@ function CanvasListPage() {
 		keyword?: string;
 		sortBy?: "createdAt" | "updatedAt";
 	}) {
-		void navigate({
-			search: (current) => ({
-				keyword: next.keyword ?? current.keyword,
-				sortBy: next.sortBy ?? current.sortBy,
+		const nextFilters = {
+			keyword: next.keyword ?? keyword,
+			sortBy: next.sortBy ?? sortBy,
+		};
+
+		// URL 未变化时路由不会重新加载，主动刷新可让重复提交也确实发起请求。
+		if (
+			nextFilters.keyword === keyword &&
+			nextFilters.sortBy === sortBy
+		) {
+			void refreshCanvasList(nextFilters);
+			return;
+		}
+
+		void refreshCanvasList(nextFilters).then(() =>
+			navigate({
+				to: "/projects",
+				search: nextFilters,
+				replace: true,
 			}),
-			replace: true,
-		});
+		);
 	}
 
 	function onSubmitFilter(event: FormEvent<HTMLFormElement>) {

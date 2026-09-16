@@ -38,6 +38,7 @@ export function CanvasListToolbar({
 					onSubmit={onSubmitFilter}
 				>
 					<Input
+						type="search"
 						value={keywordInput}
 						onChange={(event) => onKeywordInputChange(event.target.value)}
 						placeholder="搜索名称"
@@ -45,6 +46,9 @@ export function CanvasListToolbar({
 						name="keyword"
 						maxLength={100}
 					/>
+					<button type="submit" className="sr-only">
+						搜索
+					</button>
 					<Select
 						value={sortBy}
 						onValueChange={(value) => {

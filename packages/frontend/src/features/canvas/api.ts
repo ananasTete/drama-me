@@ -1,20 +1,23 @@
 import { HttpClient, throwIfNotOk } from "@/lib/api";
-import { DEFAULT_CANVAS_NAME } from "@drama-me/shared";
+import {
+	type ApplyCanvasOperationsBody,
+	type CanvasViewport,
+	type UpdateCanvasMetadataBody,
+} from "@drama-me/shared";
 import type { CanvasListFilters } from "./types";
 
-export const CANVAS_PAGE_SIZE = 12;
+export const CANVAS_PAGE_LIMIT = 12;
 
 export async function fetchCanvasPage(
 	filters: CanvasListFilters,
-	page: number,
+	cursor: string | null,
 ) {
 	const res = await HttpClient.api.canvases.$get({
 		query: {
 			keyword: filters.keyword || undefined,
 			sortBy: filters.sortBy,
-			order: "desc",
-			page: String(page),
-			pageSize: String(CANVAS_PAGE_SIZE),
+			limit: String(CANVAS_PAGE_LIMIT),
+			cursor: cursor ?? undefined,
 		},
 	});
 	await throwIfNotOk(res);
@@ -31,7 +34,7 @@ export async function fetchCanvas(id: string) {
 
 export async function createUntitledCanvas() {
 	const res = await HttpClient.api.canvases.$post({
-		json: { name: DEFAULT_CANVAS_NAME },
+		json: {},
 	});
 	await throwIfNotOk(res);
 	return res.json();
@@ -45,10 +48,37 @@ export async function deleteCanvas(id: string) {
 	return res.json();
 }
 
-export async function updateCanvasSettings(id: string, snapToGrid: boolean) {
-	const res = await HttpClient.api.canvases[":id"].settings.$patch({
+export async function updateCanvasMetadata(
+	id: string,
+	metadata: UpdateCanvasMetadataBody,
+) {
+	const res = await HttpClient.api.canvases[":id"].$patch({
 		param: { id },
-		json: { snapToGrid },
+		json: metadata,
+	});
+	await throwIfNotOk(res);
+	return res.json();
+}
+
+export async function updateCanvasViewport(
+	id: string,
+	viewport: CanvasViewport,
+) {
+	const res = await HttpClient.api.canvases[":id"].viewport.$put({
+		param: { id },
+		json: viewport,
+	});
+	await throwIfNotOk(res);
+	return res.json();
+}
+
+export async function applyCanvasOperations(
+	id: string,
+	body: ApplyCanvasOperationsBody,
+) {
+	const res = await HttpClient.api.canvases[":id"].operations.$post({
+		param: { id },
+		json: body,
 	});
 	await throwIfNotOk(res);
 	return res.json();

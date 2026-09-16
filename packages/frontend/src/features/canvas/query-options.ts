@@ -11,13 +11,8 @@ export function canvasListQueryOptions(filters: CanvasListFilters) {
 		queryKey: canvasKeys.list(filters),
 		queryFn: ({ pageParam }) => fetchCanvasPage(filters, pageParam),
 		...keepPreviousQueryData,
-		initialPageParam: 1,
-		getNextPageParam: (lastPage) => {
-			if (lastPage.page * lastPage.pageSize >= lastPage.total) {
-				return undefined;
-			}
-			return lastPage.page + 1;
-		},
+		initialPageParam: null as string | null,
+		getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
 		staleTime: 30_000,
 		gcTime: CANVAS_CACHE_GC_TIME,
 	});
