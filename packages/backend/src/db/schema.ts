@@ -1,18 +1,27 @@
 import {
 	CURRENT_CANVAS_SCHEMA_VERSION,
-	type CanvasEdge,
-	type CanvasNode,
+	type CanvasImageNodeData,
+	type CanvasTextNodeData,
+	type CanvasVideoNodeData,
 	type CanvasViewport,
 	EMPTY_CANVAS_VIEWPORT,
 } from "@drama-me/shared";
 import { relations, sql } from "drizzle-orm";
 import {
 	check,
+	foreignKey,
 	index,
 	integer,
+	real,
 	sqliteTable,
 	text,
+	uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+
+type CanvasNodeData =
+	| CanvasTextNodeData
+	| CanvasImageNodeData
+	| CanvasVideoNodeData;
 
 // ──────────────────────────────────────────────
 // Better Auth 核心表
@@ -96,9 +105,7 @@ export const verification = sqliteTable("verification", {
 });
 
 /**
- * 画布表：一份文档一行。
- * 信封字段是真正的列；viewport / nodes / edges 用 JSON 文本存储。
- * 图内容的结构由应用层校验，数据库只保证这些 JSON 列非空。
+ * 画布表只保存文档级字段；节点和连线拆表存储，避免局部修改时重写整份图。
  */
 export const canvas = sqliteTable(
 	"canvas",
@@ -112,14 +119,6 @@ export const canvas = sqliteTable(
 			.$type<CanvasViewport>()
 			.notNull()
 			.default(EMPTY_CANVAS_VIEWPORT),
-		nodes: text("nodes", { mode: "json" })
-			.$type<CanvasNode[]>()
-			.notNull()
-			.default([]),
-		edges: text("edges", { mode: "json" })
-			.$type<CanvasEdge[]>()
-			.notNull()
-			.default([]),
 		// SQLite 以 0 / 1 存布尔值；默认关闭，保证旧画布迁移后的行为不变。
 		snapToGrid: integer("snapToGrid", { mode: "boolean" })
 			.notNull()
@@ -136,6 +135,98 @@ export const canvas = sqliteTable(
 		index("canvas_ownerId_updatedAt_idx").on(table.ownerId, table.updatedAt),
 		check("canvas_schema_version_positive", sql`${table.schemaVersion} >= 1`),
 		check("canvas_revision_positive", sql`${table.revision} >= 1`),
+	],
+);
+
+export const canvasNode = sqliteTable(
+	"canvasNode",
+	{
+		id: text("id").primaryKey(),
+		canvasId: text("canvasId")
+			.notNull()
+			.references(() => canvas.id, { onDelete: "cascade" }),
+		type: text("type", { enum: ["text", "image", "video"] }).notNull(),
+		positionX: real("positionX").notNull(),
+		positionY: real("positionY").notNull(),
+		width: real("width").notNull(),
+		height: real("height").notNull(),
+		zIndex: integer("zIndex").notNull(),
+		locked: integer("locked", { mode: "boolean" }).notNull(),
+		data: text("data", { mode: "json" }).$type<CanvasNodeData>().notNull(),
+	},
+	(table) => [
+		index("canvasNode_canvasId_idx").on(table.canvasId),
+		uniqueIndex("canvasNode_canvasId_id_unique").on(table.canvasId, table.id),
+		check(
+			"canvasNode_type_valid",
+			sql`${table.type} IN ('text', 'image', 'video')`,
+		),
+		check("canvasNode_width_positive", sql`${table.width} > 0`),
+		check("canvasNode_height_positive", sql`${table.height} > 0`),
+	],
+);
+
+export const canvasEdge = sqliteTable(
+	"canvasEdge",
+	{
+		id: text("id").primaryKey(),
+		canvasId: text("canvasId")
+			.notNull()
+			.references(() => canvas.id, { onDelete: "cascade" }),
+		sourceNodeId: text("sourceNodeId").notNull(),
+		targetNodeId: text("targetNodeId").notNull(),
+		sourceHandle: text("sourceHandle", { enum: ["left", "right"] }).notNull(),
+		targetHandle: text("targetHandle", { enum: ["left", "right"] }).notNull(),
+		type: text("type", { enum: ["default"] }).notNull(),
+	},
+	(table) => [
+		index("canvasEdge_canvasId_idx").on(table.canvasId),
+		foreignKey({
+			columns: [table.canvasId, table.sourceNodeId],
+			foreignColumns: [canvasNode.canvasId, canvasNode.id],
+			name: "canvasEdge_sourceNode_fk",
+		}).onDelete("cascade"),
+		foreignKey({
+			columns: [table.canvasId, table.targetNodeId],
+			foreignColumns: [canvasNode.canvasId, canvasNode.id],
+			name: "canvasEdge_targetNode_fk",
+		}).onDelete("cascade"),
+		check(
+			"canvasEdge_sourceHandle_valid",
+			sql`${table.sourceHandle} IN ('left', 'right')`,
+		),
+		check(
+			"canvasEdge_targetHandle_valid",
+			sql`${table.targetHandle} IN ('left', 'right')`,
+		),
+		check("canvasEdge_type_valid", sql`${table.type} = 'default'`),
+	],
+);
+
+/** 成功 mutation 的回执，用于在响应丢失后安全重试，不是撤销历史。 */
+export const canvasMutation = sqliteTable(
+	"canvasMutation",
+	{
+		mutationId: text("mutationId").primaryKey(),
+		canvasId: text("canvasId")
+			.notNull()
+			.references(() => canvas.id, { onDelete: "cascade" }),
+		requestHash: text("requestHash").notNull(),
+		baseRevision: integer("baseRevision").notNull(),
+		resultingRevision: integer("resultingRevision").notNull(),
+		createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
+	},
+	(table) => [
+		index("canvasMutation_canvasId_idx").on(table.canvasId),
+		index("canvasMutation_createdAt_idx").on(table.createdAt),
+		check(
+			"canvasMutation_baseRevision_positive",
+			sql`${table.baseRevision} >= 1`,
+		),
+		check(
+			"canvasMutation_resultingRevision_positive",
+			sql`${table.resultingRevision} >= 1`,
+		),
 	],
 );
 
@@ -156,6 +247,30 @@ export const accountRelations = relations(account, ({ one }) => ({
 	user: one(user, { fields: [account.userId], references: [user.id] }),
 }));
 
-export const canvasRelations = relations(canvas, ({ one }) => ({
+export const canvasRelations = relations(canvas, ({ one, many }) => ({
 	owner: one(user, { fields: [canvas.ownerId], references: [user.id] }),
+	nodes: many(canvasNode),
+	edges: many(canvasEdge),
+	mutations: many(canvasMutation),
+}));
+
+export const canvasNodeRelations = relations(canvasNode, ({ one }) => ({
+	canvas: one(canvas, {
+		fields: [canvasNode.canvasId],
+		references: [canvas.id],
+	}),
+}));
+
+export const canvasEdgeRelations = relations(canvasEdge, ({ one }) => ({
+	canvas: one(canvas, {
+		fields: [canvasEdge.canvasId],
+		references: [canvas.id],
+	}),
+}));
+
+export const canvasMutationRelations = relations(canvasMutation, ({ one }) => ({
+	canvas: one(canvas, {
+		fields: [canvasMutation.canvasId],
+		references: [canvas.id],
+	}),
 }));

@@ -22,6 +22,20 @@
       "when": 1788857089990,
       "tag": "0002_purple_lorna_dane",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789451060389,
+      "tag": "0003_canvas_operations",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789453881021,
+      "tag": "0004_illegal_raider",
+      "breakpoints": true
     }
   ]
 }

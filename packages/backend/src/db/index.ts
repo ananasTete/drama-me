@@ -6,6 +6,8 @@ import * as schema from "./schema";
 // 数据库文件放在 backend 包根目录（已被 .gitignore 忽略）
 const dbPath = `${import.meta.dir}/../../app.db`;
 const sqlite = new Database(dbPath);
+// 节点与连线依赖级联删除和同画布复合外键，连接建立后必须显式开启。
+sqlite.exec("PRAGMA foreign_keys = ON;");
 // 锁等待：并发或 watch 热重载时，遇到锁最多等 5 秒，避免立即报 SQLITE_BUSY
 sqlite.exec("PRAGMA busy_timeout = 5000;");
 // WAL 模式：提升并发读写性能，SQLite 官方推荐配置

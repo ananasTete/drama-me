@@ -1,8 +1,9 @@
 import {
+	ApplyCanvasOperationsBodySchema,
+	ApplyCanvasOperationsResponseSchema,
 	CURRENT_CANVAS_SCHEMA_VERSION,
-	CanvasDtoSchema,
 	CanvasIdParamSchema,
-	CanvasListItemSchema,
+	CanvasViewportSchema,
 	CreateCanvasBodySchema,
 	CreateCanvasResponseSchema,
 	DEFAULT_CANVAS_NAME,
@@ -12,10 +13,11 @@ import {
 	GetCanvasResponseSchema,
 	ListCanvasesQuerySchema,
 	ListCanvasesResponseSchema,
-	UpdateCanvasSettingsBodySchema,
-	UpdateCanvasSettingsResponseSchema,
+	UpdateCanvasMetadataBodySchema,
+	UpdateCanvasMetadataResponseSchema,
+	UpdateCanvasViewportResponseSchema,
 } from "@drama-me/shared";
-import { and, asc, count, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../db";
 import { canvas } from "../db/schema";
@@ -27,34 +29,28 @@ import {
 	queryValidator,
 } from "../lib/zod-validator";
 import { authMiddleware, requireUser } from "../middleware/auth";
+import {
+	loadCanvasDto,
+	toCanvasDto,
+	toCanvasMetadata,
+	toIso,
+	toLikeContainsPattern,
+} from "../services/canvas-document";
+import { applyCanvasOperations } from "../services/canvas-operations";
 
-// 把 keyword 里的 % _ \ 当成普通字符，避免 LIKE 通配符被用户输入放大
-function toLikeContainsPattern(keyword: string): string {
-	const escaped = keyword
-		.replaceAll("\\", "\\\\")
-		.replaceAll("%", "\\%")
-		.replaceAll("_", "\\_");
-	return `%${escaped}%`;
+function decodeCanvasListCursor(cursor: string): {
+	sortValue: Date;
+	id: string;
+} {
+	const separatorIndex = cursor.indexOf(":");
+	return {
+		sortValue: new Date(Number(cursor.slice(0, separatorIndex))),
+		id: cursor.slice(separatorIndex + 1),
+	};
 }
 
-function toIso(date: Date): string {
-	return date.toISOString();
-}
-
-function toCanvasDto(row: typeof canvas.$inferSelect) {
-	return CanvasDtoSchema.parse({
-		id: row.id,
-		ownerId: row.ownerId,
-		name: row.name,
-		viewport: row.viewport,
-		nodes: row.nodes,
-		edges: row.edges,
-		snapToGrid: row.snapToGrid,
-		schemaVersion: row.schemaVersion,
-		revision: row.revision,
-		createdAt: toIso(row.createdAt),
-		updatedAt: toIso(row.updatedAt),
-	});
+function encodeCanvasListCursor(sortValue: Date, id: string): string {
+	return `${sortValue.getTime()}:${id}`;
 }
 
 const canvases = new Hono<{ Variables: AuthType }>()
@@ -63,7 +59,7 @@ const canvases = new Hono<{ Variables: AuthType }>()
 		const user = requireUser(c);
 
 		const body = c.req.valid("json");
-		const name = body.name || DEFAULT_CANVAS_NAME;
+		const name = body.name ?? DEFAULT_CANVAS_NAME;
 		const now = new Date();
 
 		const [row] = await db
@@ -73,8 +69,6 @@ const canvases = new Hono<{ Variables: AuthType }>()
 				ownerId: user.id,
 				name,
 				viewport: EMPTY_CANVAS_VIEWPORT,
-				nodes: [],
-				edges: [],
 				snapToGrid: false,
 				schemaVersion: CURRENT_CANVAS_SCHEMA_VERSION,
 				revision: 1,
@@ -88,7 +82,7 @@ const canvases = new Hono<{ Variables: AuthType }>()
 		}
 
 		return c.json(
-			CreateCanvasResponseSchema.parse({ canvas: toCanvasDto(row) }),
+			CreateCanvasResponseSchema.parse({ canvas: toCanvasDto(row, [], []) }),
 			201,
 		);
 	})
@@ -99,53 +93,66 @@ const canvases = new Hono<{ Variables: AuthType }>()
 		const keyword = query.keyword?.trim() || undefined;
 		const sortColumn =
 			query.sortBy === "createdAt" ? canvas.createdAt : canvas.updatedAt;
-		const orderBy = query.order === "asc" ? asc(sortColumn) : desc(sortColumn);
+		const orderBy = [desc(sortColumn), asc(canvas.id)];
 
 		const ownerFilter = eq(canvas.ownerId, user.id);
-		const where = keyword
-			? and(
-					ownerFilter,
-					sql`${canvas.name} LIKE ${toLikeContainsPattern(keyword)} ESCAPE char(92)`,
-				)
-			: ownerFilter;
+		const keywordFilter = keyword
+			? sql`${canvas.name} LIKE ${toLikeContainsPattern(keyword)} ESCAPE char(92)`
+			: undefined;
+		const cursorFilter = query.cursor
+			? (() => {
+					const cursor = decodeCanvasListCursor(query.cursor);
+					return or(
+						lt(sortColumn, cursor.sortValue),
+						and(
+							eq(sortColumn, cursor.sortValue),
+							gt(canvas.id, cursor.id),
+						),
+					);
+				})()
+			: undefined;
+		const where = and(ownerFilter, keywordFilter, cursorFilter);
 
-		const offset = (query.page - 1) * query.pageSize;
+		// 多取一条只用于判断是否还有下一批，避免为滚动列表额外 COUNT 全量数据。
+		const rows = await db
+			.select({
+				id: canvas.id,
+				ownerId: canvas.ownerId,
+				name: canvas.name,
+				schemaVersion: canvas.schemaVersion,
+				revision: canvas.revision,
+				createdAt: canvas.createdAt,
+				updatedAt: canvas.updatedAt,
+			})
+			.from(canvas)
+			.where(where)
+			.orderBy(...orderBy)
+			.limit(query.limit + 1);
 
-		const [rows, [totalRow]] = await Promise.all([
-			db
-				.select({
-					id: canvas.id,
-					ownerId: canvas.ownerId,
-					name: canvas.name,
-					schemaVersion: canvas.schemaVersion,
-					revision: canvas.revision,
-					createdAt: canvas.createdAt,
-					updatedAt: canvas.updatedAt,
-				})
-				.from(canvas)
-				.where(where)
-				.orderBy(orderBy)
-				.limit(query.pageSize)
-				.offset(offset),
-			db.select({ total: count() }).from(canvas).where(where),
-		]);
+		const pageRows = rows.slice(0, query.limit);
+		const lastRow = pageRows.at(-1);
+		const nextCursor =
+			rows.length > query.limit && lastRow
+				? encodeCanvasListCursor(
+						query.sortBy === "createdAt"
+							? lastRow.createdAt
+							: lastRow.updatedAt,
+						lastRow.id,
+					)
+				: null;
 
 		return c.json(
 			ListCanvasesResponseSchema.parse({
-				canvases: rows.map((row) =>
-					CanvasListItemSchema.parse({
-						id: row.id,
-						ownerId: row.ownerId,
-						name: row.name,
-						schemaVersion: row.schemaVersion,
-						revision: row.revision,
-						createdAt: toIso(row.createdAt),
-						updatedAt: toIso(row.updatedAt),
-					}),
-				),
-				total: totalRow?.total ?? 0,
-				page: query.page,
-				pageSize: query.pageSize,
+				canvases: pageRows.map((row) => ({
+					id: row.id,
+					ownerId: row.ownerId,
+					name: row.name,
+					schemaVersion: row.schemaVersion,
+					revision: row.revision,
+					createdAt: toIso(row.createdAt),
+					updatedAt: toIso(row.updatedAt),
+				})),
+				nextCursor,
 			}),
 		);
 	})
@@ -163,32 +170,87 @@ const canvases = new Hono<{ Variables: AuthType }>()
 			throw new AppError(ERROR_CODE.CANVAS_NOT_FOUND, 404, "Canvas not found");
 		}
 
-		return c.json(GetCanvasResponseSchema.parse({ canvas: toCanvasDto(row) }));
+		return c.json(
+			GetCanvasResponseSchema.parse({ canvas: await loadCanvasDto(db, row) }),
+		);
 	})
-	.patch(
-		"/canvases/:id/settings",
+	.post(
+		"/canvases/:id/operations",
 		paramValidator(CanvasIdParamSchema),
-		jsonValidator(UpdateCanvasSettingsBodySchema),
+		jsonValidator(ApplyCanvasOperationsBodySchema),
+		(c) => {
+			const user = requireUser(c);
+			const { id } = c.req.valid("param");
+			const body = c.req.valid("json");
+			return c.json(
+				ApplyCanvasOperationsResponseSchema.parse(
+					applyCanvasOperations(db, user.id, id, body),
+				),
+			);
+		},
+	)
+	.patch(
+		"/canvases/:id",
+		paramValidator(CanvasIdParamSchema),
+		jsonValidator(UpdateCanvasMetadataBodySchema),
 		async (c) => {
 			const user = requireUser(c);
 			const { id } = c.req.valid("param");
-			const { snapToGrid } = c.req.valid("json");
+			const body = c.req.valid("json");
 
 			const [updated] = await db
 				.update(canvas)
-				.set({ snapToGrid, updatedAt: new Date() })
+				.set({
+					...(body.name === undefined ? {} : { name: body.name }),
+					...(body.snapToGrid === undefined
+						? {}
+						: { snapToGrid: body.snapToGrid }),
+					// 重命名算文档更新；编辑偏好不会改变列表的“最近更新”顺序。
+					...(body.name === undefined ? {} : { updatedAt: new Date() }),
+				})
 				.where(and(eq(canvas.id, id), eq(canvas.ownerId, user.id)))
 				.returning();
 
 			if (!updated) {
-				throw new AppError(ERROR_CODE.CANVAS_NOT_FOUND, 404, "Canvas not found");
+				throw new AppError(
+					ERROR_CODE.CANVAS_NOT_FOUND,
+					404,
+					"Canvas not found",
+				);
 			}
 
 			return c.json(
-				UpdateCanvasSettingsResponseSchema.parse({
-					canvas: toCanvasDto(updated),
+				UpdateCanvasMetadataResponseSchema.parse({
+					canvas: toCanvasMetadata(updated),
 				}),
 			);
+		},
+	)
+	.put(
+		"/canvases/:id/viewport",
+		paramValidator(CanvasIdParamSchema),
+		jsonValidator(CanvasViewportSchema),
+		async (c) => {
+			const user = requireUser(c);
+			const { id } = c.req.valid("param");
+			const viewport = c.req.valid("json");
+
+			const [updated] = await db
+				.update(canvas)
+				// viewport 是浏览位置，不改变 revision 和列表的最近更新时间。
+				.set({ viewport })
+				.where(and(eq(canvas.id, id), eq(canvas.ownerId, user.id)))
+				.returning({ viewport: canvas.viewport });
+
+			if (!updated) {
+				throw new AppError(
+					ERROR_CODE.CANVAS_NOT_FOUND,
+					404,
+					"Canvas not found",
+				);
+			}
+
+			return c.json(UpdateCanvasViewportResponseSchema.parse(updated));
 		},
 	)
 	.delete("/canvases/:id", paramValidator(CanvasIdParamSchema), async (c) => {

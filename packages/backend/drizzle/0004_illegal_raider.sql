@@ -1,0 +1,1 @@
+CREATE INDEX `canvasMutation_createdAt_idx` ON `canvasMutation` (`createdAt`);
